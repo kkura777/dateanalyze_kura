@@ -1,0 +1,211 @@
+ ALTER TABLE userbehavior change timestamp timestamps int(14);
+ 
+ -- 去重
+ SELECT user_id,item_id,timestamps
+ from userbehavior
+ group by user_id,item_id,timestamps
+ having count(*) >1;
+ 
+ -- 添加几个新列
+ alter table userbehavior add datetimes timestamp(0);
+ update userbehavior set datetimes = from_unixtime(timestamps);
+ 
+  alter table userbehavior add dates char(10);
+  update userbehavior set dates = substring(datetimes,1,10);
+    alter table userbehavior add times char(8);
+  update userbehavior set times = substring(datetimes,12,8);
+   alter table userbehavior add hours char(2);
+  update userbehavior set hours = substring(datetimes,12,2);
+ select * from userbehavior 
+ limit 5;
+ 
+ select max(datetimes),min(datetimes) from userbehavior;
+ 
+ -- 数据概览
+ desc userbehavioir;
+ select * from userbehavior limit 5;
+ select count(1) from userbehavior;  -- 54872条数据
+
+
+-- 创建临时表
+create table temp_behavior like userbehavior; 
+
+-- 截取
+insert into temp_behavior
+select * from userbehavior limit 1000;
+
+select * from temp_behavior;
+
+-- getting everyday pv 页面浏览量（pageview）
+select dates,count(*)
+from temp_behavior
+where behavior_type = 'pv'
+group by dates;
+
+-- getting everyday uv 独立访客量（unique visitor）,没有全部导完so nodate
+select dates,count(distinct user_id) as 'uv'
+from temp_behavior
+where behavior_type = 'uv'
+group by dates;
+
+-- 浏览深度语句 pv/uv
+select dates,count(*) as pv,count(distinct user_id) as 'uv',
+       round(count(*)/count(distinct user_id),1) as 'pv/uv'
+ from temp_behavior
+ where behavior_type = 'pv'
+ group by dates;
+ 
+ -- 创建新表来存储所得到获客情况的数据
+ create table pv_uv_puv(
+		 dates char(10),
+		 pv int(9), uv int(9),
+		 puv decimal(10,1)
+ );
+
+ -- 插入所得到的查询数据到新表
+insert into pv_uv_puv
+select dates,
+          count(*) as pv,count(distinct user_id) as 'uv',
+          round(count(*)/count(distinct user_id),1) as 'pv/uv'
+ from userbehavior
+ where behavior_type = 'pv'
+ group by dates;
+ 
+ select * from userbehavior 
+ where dates is null;
+
+ -- 用户的活跃度user activity 上线率
+ select user_id,dates
+ from temp_behavior 
+ group by user_id,dates;
+      -- 计算用户的留存率  
+     留存率就是留下来存在的比率，
+    次日留存率就是新登用户在第一天登后次日再次登录游戏的比例
+ select *  from 
+     (select user_id,dates
+	 from temp_behavior
+	 group by user_id,dates) as a,
+	 (select user_id,dates
+	 from temp_behavior
+	 group by user_id,dates) as b
+where a.user_id = b.user_id;
+
+-- 去除b日期中之前已经比较过的a日期 delete一下 tha same
+ select *  from 
+     (select user_id,dates
+	 from temp_behavior
+	 group by user_id,dates) as a,
+	 (select user_id,dates
+	 from temp_behavior
+	 group by user_id,dates) as b
+where a.user_id = b.user_id and a.dates < b.dates;
+
+-- 筛选出a与b只相差一天的对比数据
+select a.dates,
+       count(if(datediff(b.dates,a.dates)=1,b.user_id,null))
+ from 
+     (select user_id,dates
+	 from temp_behavior
+	 group by user_id,dates) as a,
+	 (select user_id,dates
+	 from temp_behavior
+	 group by user_id,dates) as b
+where a.user_id = b.user_id and a.dates < b.dates
+group by a.dates;
+
+select a.dates,
+       count(if(datediff(b.dates,a.dates)=0,b.user_id,null)) as retention_0,
+       count(if(datediff(b.dates,a.dates)=1,b.user_id,null)) as retention_1,
+       count(if(datediff(b.dates,a.dates)=3,b.user_id,null)) as retention_3
+ from 
+     (select user_id,dates
+	 from temp_behavior
+	 group by user_id,dates) as a,
+	 (select user_id,dates
+	 from temp_behavior
+	 group by user_id,dates) as b
+where a.user_id = b.user_id and a.dates <= b.dates
+group by a.dates;
+
+select a.dates,
+       count(if(datediff(b.dates,a.dates)=1,b.user_id,null))/
+       count(if(datediff(b.dates,a.dates)=0,b.user_id,null)) as retention_1
+ from 
+     (select user_id,dates
+	 from temp_behavior
+	 group by user_id,dates) as a,
+	 (select user_id,dates
+	 from temp_behavior
+	 group by user_id,dates) as b
+where a.user_id = b.user_id and a.dates <= b.dates
+group by a.dates;
+
+-- 建表保留一下留存率结果
+create table rentention_rate(
+ dates char(10),
+ retention_1 float);
+ 
+ insert into rentention_rate
+ select a.dates,
+       count(if(datediff(b.dates,a.dates)=1,b.user_id,null))/
+       count(if(datediff(b.dates,a.dates)=0,b.user_id,null)) as retention_1
+ from 
+     (select user_id,dates
+	 from temp_behavior
+	 group by user_id,dates) as a,
+	 (select user_id,dates
+	 from userbehavior
+	 group by user_id,dates) as b
+where a.user_id = b.user_id and a.dates <= b.dates
+group by a.dates;
+
+select * from rentention_rate;
+
+-- 跳失率 用户只点击了一次就永久消失了
+select count(*)
+from(
+select user_id from userbehavior
+group by user_id
+having count(behavior_type) = 1) as a;
+
+select sum(pv) from pv_uv_puv;  -- 162932条记录 和上面的相÷就是跳失率
+
+ -- 统计日期一小时的行为
+select dates,hours,
+       count(if(behavior_type='pv',behavior_type,null)) as 'pv',
+       count(if(behavior_type='cart',behavior_type,null)) as 'cart',
+	   count(if(behavior_type='fav',behavior_type,null)) as 'fav',
+        count(if(behavior_type='buy',behavior_type,null)) as 'buy'
+from temp_behavior
+group by dates,hours
+order by dates,hours;
+ -- 建表并插入数据方法1
+create table date_hour_behavior(
+  dates char(10),
+  hours char(2),
+  pv int,cart int,
+  fav int, buy int);
+  
+  insert into date_hour_behavior
+  select dates,hours,
+       count(if(behavior_type='pv',behavior_type,null)) as 'pv',
+       count(if(behavior_type='cart',behavior_type,null)) as 'cart',
+	   count(if(behavior_type='fav',behavior_type,null)) as 'fav',
+        count(if(behavior_type='buy',behavior_type,null)) as 'buy'
+from userbehavior
+group by dates,hours
+order by dates,hours;
+   -- 建表并插入数据方法2
+  create table date_hour_behavior
+  as select * from (
+    select dates,hours,
+       count(if(behavior_type='pv',behavior_type,null)) as 'pv',
+       count(if(behavior_type='cart',behavior_type,null)) as 'cart',
+	   count(if(behavior_type='fav',behavior_type,null)) as 'fav',
+        count(if(behavior_type='buy',behavior_type,null)) as 'buy'
+from userbehavior
+group by dates,hours
+order by dates,hours) as a     
+   这里如果不as a，也就是不给select的结果表赋值，就会出现
+   every derived table must have its alias的error
+ 
