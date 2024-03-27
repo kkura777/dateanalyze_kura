@@ -1,4 +1,5 @@
- ALTER TABLE userbehavior change timestamp timestamps int(14);
+-- 改一下表的名字 change table's name
+ALTER TABLE userbehavior change timestamp timestamps int(14);
  
  -- 去重
  SELECT user_id,item_id,timestamps
