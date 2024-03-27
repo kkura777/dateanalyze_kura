@@ -237,7 +237,7 @@ as select * from (
 	from userbehavior
 	group by behavior_type
 	order by behavior_type desc)as a;
-    
+-- 创建视图以便后续直接利用这个查询结果
 create view user_behavior_view as
 select user_id,item_id,
        count(if(behavior_type='pv',behavior_type,null)) as 'pv',
