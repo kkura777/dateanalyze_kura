@@ -1,7 +1,7 @@
 -- 改一下表的名字 change table's name
 ALTER TABLE userbehavior change timestamp timestamps int(14);
  
- -- 去重
+ -- 检查重复值并去重
  SELECT user_id,item_id,timestamps
  from userbehavior
  group by user_id,item_id,timestamps
@@ -79,9 +79,10 @@ select dates,
  select user_id,dates
  from temp_behavior 
  group by user_id,dates;
+
       -- 计算用户的留存率  
      留存率就是留下来存在的比率，
-    次日留存率就是新登用户在第一天登后次日再次登录游戏的比例
+     次日留存率就是新登用户在第一天登后次日再次登录游戏的比例
  select *  from 
      (select user_id,dates
 	 from temp_behavior
@@ -209,4 +210,40 @@ group by dates,hours
 order by dates,hours) as a     
    这里如果不as a，也就是不给select的结果表赋值，就会出现
    every derived table must have its alias的error
+
+-- 统计各类用户行为数
+select behavior_type,count(distinct user_id) as user_num
+from temp_behavior
+group by behavior_type
+order by behavior_type desc;
+-- 存储一下结果（还是有两种）insert into和create table as select
+create table bahavior_user_num
+as select * from(
+       select behavior_type,count(distinct user_id) as user_num
+		from userbehavior
+		group by behavior_type
+		order by behavior_type desc
+) as a;
+
+-- 统计一下各类行为发生的次数 buy cart类的
+select behavior_type,count(*) as user_num
+from temp_behavior
+group by behavior_type
+order by behavior_type desc;
+-- 存储一下结果（还是有两种）insert into和create table as select
+create table behavior_num 
+as select * from (
+	select behavior_type,count(*) as user_num
+	from userbehavior
+	group by behavior_type
+	order by behavior_type desc)as a;
+    
+create view user_behavior_view as
+select user_id,item_id,
+       count(if(behavior_type='pv',behavior_type,null)) as 'pv',
+       count(if(behavior_type='cart',behavior_type,null)) as 'cart',
+	   count(if(behavior_type='fav',behavior_type,null)) as 'fav',
+        count(if(behavior_type='buy',behavior_type,null)) as 'buy'
+from userbehavior
+group by user_id,item_id
  
