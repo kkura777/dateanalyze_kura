@@ -246,4 +246,109 @@ select user_id,item_id,
         count(if(behavior_type='buy',behavior_type,null)) as 'buy'
 from userbehavior
 group by user_id,item_id
+-- 购买路径类型分析
+create view user_behavior_standard as
+select user_id,item_id,
+	   (case when pv > 0 then 1 else 0 end) as '浏览了',
+       (case when fav > 0 then 1 else 0 end) as '收藏了',
+       (case when cart > 0 then 1 else 0 end) as '加购了',
+       (case when buy > 0 then 1 else 0 end) as '购买了'
+from user_behavior_view;
+
+create view user_behavior_path as
+select *,
+concat(浏览了,收藏了,加购了,购买了) as '购买路径类型'
+from user_behavior_standard a
+where a.购买了 > 0
+
+-- 统计各类购买行为数量
+create view path_count as
+select 购买路径类型, count(*) as '数量'
+from user_behavior_path
+group by 购买路径类型
+order by 数量 desc;
+        
+insert into path_result
+select path_type,description,数量 
+from path_count p
+join renhua r on p.购买路径类型 = r.path_type
+order by 数量 desc;
+
+select sum(buy)
+from user_behavior_view
+where buy >0 and fav = 0 and cart = 0;
+
+-- 最近购买时间
+select user_id, max(dates) as '最近购买时间'
+from temp_behavior
+where behavior_type = 'buy'
+group by user_id
+order by 2 desc;
+-- 购买次数
+select user_id,count(user_id) as '购买次数'
+from temp_behavior
+where behavior_type = 'buy'
+group by user_id
+order by 2 desc;
+
+select user_id, max(dates) as '最近购买时间',
+       count(user_id) as '购买次数'
+from temp_behavior
+where behavior_type = 'buy'
+group by user_id
+order by 2 desc,3 desc;
+
+create table rfm_model as
+select  user_id, count(user_id) as frequency,
+        max(dates) as recent
+from temp_behavior
+where behavior_type = 'buy'
+group by user_id
+order by 2 desc,3 desc;
+
+-- 建立rfm模型
+alter table rfm_model add column fscore int;
+update rfm_model
+set fscore = 
+case
+     when frequency between 20 and 28 then 5
+     when frequency between 15 and 19 then 4
+     when frequency between 10 and 15 then 3
+     when frequency between 5 and 10 then 2  
+     else 1 end;
+
+alter table rfm_model add column rscore int;
+update rfm_model
+set rscore = 
+case
+     when recent = '2017-12-03' then 5
+     when recent in ('2017-12-01','2017-12-02') then 4
+	 when recent in ('2017-11-29','2017-11-30') then 3
+     when recent in ('2017-11-27','2017-11-28') then 2
+     else 1 end;
+
+-- 分层
+set @f_avg = null;
+set @r_avg = null;
+select avg(fscore) into @f_avg from rfm_model;
+select avg(rscore) into @r_avg from rfm_model;
+
+select *, (case
+when fscore>@f_avg and rscore>@r_avg then '价值用户'
+when fscore>@f_avg and rscore<@r_avg then '保持用户'
+when fscore<@f_avg and rscore>@r_avg then '发展用户'
+when fscore<@f_avg and rscore<@r_avg then '挽留用户'
+end) class
+from rfm_model
+
+alter table rfm_model add column class varchar(40);
+update rfm_model
+set class = 
+case
+    when fscore>@f_avg and rscore>@r_avg then '价值用户'
+	when fscore>@f_avg and rscore<@r_avg then '保持用户'
+	when fscore<@f_avg and rscore>@r_avg then '发展用户'
+	when fscore<@f_avg and rscore<@r_avg then '挽留用户'
+	end
+
  
